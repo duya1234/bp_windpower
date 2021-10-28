@@ -1,0 +1,82 @@
+import torch
+from torch import nn
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import pandas as pd
+
+filePath = "D://课题//数据//龙康风场//龙康风场验证//"#定义文件路径
+nameList = os.listdir(filePath)#读取所有文件名
+
+num = 2880
+
+data = pd.read_excel(filePath + nameList[0])
+j = 0
+for i in nameList:
+    if j == 1:
+        temp = pd.read_excel(filePath + i)
+        data = data.append(temp)
+    else:
+        j = 1
+
+data = data.values[:, 1].astype(float)
+
+max_value = np.max(data)
+min_value = np.min(data)
+scalar = max_value - min_value
+data = list(map(lambda x: x / scalar, data))
+data = np.asarray(data)
+dataX = data[0:num]
+dataY = data[num:]
+
+dataX = torch.as_tensor(torch.from_numpy(dataX), dtype=torch.float32)
+dataY = torch.as_tensor(torch.from_numpy(dataY[:, np.newaxis]), dtype=torch.float32)
+dataX = dataX.cuda()
+dataY = dataY.cuda()
+
+class BP(nn.Module): #定义网络
+    def __init__(self, n_hidden=256):
+        super(BP,self).__init__()
+        self.n_hidden=n_hidden
+        self.n_out = 1
+        self.linear_layer=nn.Sequential(
+            nn.Linear(num,self.n_hidden),
+            nn.Tanh(),
+            nn.Linear(self.n_hidden,self.n_hidden),
+            nn.Tanh(),
+            nn.Linear(self.n_hidden, self.n_out)
+        )
+    def forward(self,x):          #调用方法
+        x=self.linear_layer(x)
+        return x
+
+def del_tensor_ele(arr, index):
+    arr1 = arr[0:index]
+    arr2 = arr[index+1:]
+    return torch.cat((arr1, arr2), dim=0)
+
+def inc_tensor_ele(arr1, arr2):
+    arr = torch.cat((arr1, arr2), dim=0)
+    return arr
+
+net = torch.load('bp.pth')
+pre_Y = []
+for i in range(1440):
+    prediction = net(dataX)
+    pre_Y.append(prediction)
+    dataX = del_tensor_ele(dataX, 0)
+    dataX = inc_tensor_ele(dataX, prediction)
+    '''
+    print(i, prediction)
+    print(i, dataX)
+    print(i, pre_Y)
+    '''
+NSAMPLE = 1440
+start, end = 0, 1440
+x = np.linspace(start, end, NSAMPLE, dtype=np.float32, endpoint= True)
+prediction = prediction.cpu().detach().numpy()
+dataY = dataY.cpu()
+pre_Y = torch.tensor(pre_Y)
+plt.plot(x, dataY[0:1440], 'r+', alpha=0.3)                   #‘ro’是红色，alpha是透明度，为0时完全透明
+plt.plot(x, pre_Y, 'bo', alpha=0.1)
+plt.show()

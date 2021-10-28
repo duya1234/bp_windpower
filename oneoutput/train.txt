@@ -1,0 +1,125 @@
+import torch
+from torch import nn
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+
+#NSAMPLE = 2500
+#x = np.float32(np.random.uniform(-10.5, 10.5, (1, NSAMPLE))).T
+#r = np.float32(np.random.normal(size=(NSAMPLE,1))) #高斯噪声
+#y = np.float32(np.sin(0.75*x)*7.0+x*0.5+r*1.0)
+filePath = "D://课题//数据//龙康风场//龙康风场训练//"#定义文件路径
+nameList = os.listdir(filePath)#读取所有文件名
+
+data = pd.read_excel(filePath + nameList[0])
+j = 0
+for i in nameList:
+    if j == 1:
+        temp = pd.read_excel(filePath + i)
+        data = data.append(temp)
+    else:
+        j = 1
+
+data = data.values[:, 1].astype(float)
+
+max_value = np.max(data)
+
+min_value = np.min(data)
+scalar = max_value - min_value
+data = list(map(lambda x: x / scalar, data))
+
+def creat_dataset(dataset, look_back):
+    data_x = []
+    data_y = []
+    for i in range(len(dataset) - look_back):
+        data_x.append(dataset[i:i+look_back])
+        data_y.append(dataset[i+look_back])
+    return np.asarray(data_x), np.asarray(data_y) #转为ndarray数据
+
+dataX, dataY = creat_dataset(data,2880)
+
+dataX = torch.as_tensor(torch.from_numpy(dataX), dtype=torch.float32)
+dataY = torch.as_tensor(torch.from_numpy(dataY[:, np.newaxis]), dtype=torch.float32)
+dataX = dataX.cuda()
+dataY = dataY.cuda()
+#feature = data.values[0:-6, 1].astype(float)   #numpy强制数据类型转换
+#lable = data.values[6:, 1].astype(float)
+
+#feature_train=torch.as_tensor(torch.from_numpy(feature[:, np.newaxis]), dtype=torch.float32)
+#label_train=torch.as_tensor(torch.from_numpy(lable[:, np.newaxis]), dtype=torch.float32)
+
+#dataset_mix=torch.utils.data.TensorDataset(feature_train,label_train)    #将特征和标签打包成一个列表
+dataset_mix=torch.utils.data.TensorDataset(dataX, dataY)
+
+class BP(nn.Module): #定义网络
+    def __init__(self, n_hidden = 256):
+        super(BP, self).__init__()
+        self.n_hidden = n_hidden
+        self.n_out = 1
+        self.linear_layer = nn.Sequential(
+            nn.Linear(2880, self.n_hidden),
+            nn.Tanh(),
+            nn.Linear(self.n_hidden, self.n_hidden),
+            nn.Tanh(),
+            nn.Linear(self.n_hidden, self.n_out)
+        )
+    def forward(self, x):          #调用方法
+        x = self.linear_layer(x)
+        return x
+
+# The nn package also contains definitions of popular loss functions; in this
+# case we will use Mean Squared Error (MSE) as our loss function.
+loss_func = torch.nn.MSELoss().cuda()
+
+bp = BP(256).cuda()
+bp.train()
+learning_rate = 1e-6
+optimizer = torch.optim.Adam(bp.parameters(), lr=0.00001)
+
+train_loss = []
+n_epochs = 400
+for t in range(n_epochs):
+    # Forward pass: compute predicted y by passing x to the model. Module objects
+    # override the __call__ operator so you can call them like functions. When
+    # doing so you pass a Tensor of input data to the Module and it produces
+    # a Tensor of output data.
+    train_loss_batch=[]
+    trainLoader=torch.utils.data.DataLoader(dataset_mix,batch_size=2400)
+    for batch in trainLoader:
+        x_train,y_train=batch
+        y_pred = bp(x_train)
+        # Compute and print loss. We pass Tensors containing the predicted and true
+        # values of y, and the loss function returns a Tensor containing the
+        # loss.
+        loss = loss_func(y_pred, y_train)
+        #print(t, loss.item())
+        train_loss_batch.append(loss.item())
+        #print(t, loss.item())
+        # Zero the gradients before running the backward pass.
+        optimizer.zero_grad()
+        train_loss_batch
+        # Backward pass: compute gradient of the loss with respect to all the learnable
+        # parameters of the model. Internally, the parameters of each Module are stored
+        # in Tensors with requires_grad=True, so this call will compute gradients for
+        # all learnable parameters in the model.
+        loss.backward()
+        # Update the weights using gradient descent. Each parameter is a Tensor, so
+        # we can access its gradients like we did before.
+        optimizer.step()
+    #train_loss.append(sum(train_loss_batch) / len(train_loss_batch))
+    print(t, sum(train_loss_batch) / len(train_loss_batch))
+#print(dataY.shape)
+#print(dataY[-2371:] - y_pred)
+y_pred = y_pred.cpu().detach().numpy()
+dataY = dataY.cpu()
+NSAMPLE = 479
+start, end = 0, 479
+x_line = np.linspace(start, end, NSAMPLE, dtype=np.float32, endpoint= False)
+plt.plot(x_line, y_pred, 'r+', alpha=0.3)                   #‘ro’是红色，alpha是透明度，为0时完全透明
+plt.plot(x_line, dataY[-479:],'b+' , alpha=0.3)
+#plt.plot(x_data, y1_data,'y+' , alpha=0.3)
+plt.show()
+
+torch.save(bp, 'bp.pth')
